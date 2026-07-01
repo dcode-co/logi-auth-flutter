@@ -1,0 +1,27 @@
+name: logi_auth
+description: "Thin \"Sign in with logi\" connector for Flutter RP apps — OAuth 2.0 Authorization Code + PKCE with client-side id_token (RS256) verification."
+version: 1.0.0
+homepage: https://github.com/dcode-co/logi-auth-flutter
+
+environment:
+  sdk: ^3.11.0
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Dart has no platform crypto primitive available in pure Dart (unlike
+  # WebCrypto/Security.framework/java.security on the other SDKs). pointycastle
+  # is the de-facto pure-Dart crypto lib — used only for the RS256 primitive;
+  # the JWS parsing + claim checks are implemented here (mirroring verify.ts).
+  pointycastle: ^3.9.1
+  crypto: ^3.0.6
+  http: ^1.2.2
+  meta: ^1.15.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
