@@ -66,7 +66,8 @@ class Jwks {
 class VerifyExpected {
   const VerifyExpected({required this.issuer, required this.clientId, this.nonce});
 
-  /// id_token.iss must equal this (logi issuer STRING "logi", NOT a URL).
+  /// id_token.iss must equal this (production logi issuer URL
+  /// "https://api.1pass.dev"; "logi" is a dev-only fallback).
   final String issuer;
 
   /// id_token.aud must contain this (the RP's client_id).

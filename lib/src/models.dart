@@ -8,7 +8,7 @@ class LogiAuthConfig {
     required this.clientId,
     required this.redirectUri,
     this.issuer = 'https://api.1pass.dev',
-    this.tokenIssuer = 'logi',
+    this.tokenIssuer = 'https://api.1pass.dev',
     this.scopes = const ['openid', 'profile:basic', 'email'],
   });
 
@@ -22,8 +22,9 @@ class LogiAuthConfig {
   /// Base URL of the logi IdP.
   final String issuer;
 
-  /// Expected `iss` claim inside the id_token — the logi issuer STRING
-  /// ("logi"), NOT the [issuer] URL (mirrors server OIDC_ISSUER).
+  /// Expected `iss` claim inside the id_token — the production logi issuer URL
+  /// ("https://api.1pass.dev", mirrors server OIDC_ISSUER). The string "logi" is
+  /// a dev-only fallback.
   final String tokenIssuer;
 
   /// Default OAuth scopes if [LogiAuth.signIn] is called without a list.
