@@ -144,7 +144,21 @@ class LogiAuth {
         detail: resp.body,
       );
     }
-    return jsonDecode(resp.body) as Map<String, dynamic>;
+    // A 2xx body can still be a proxy error page or otherwise malformed — a
+    // raw FormatException/TypeError must not escape the LogiAuthException
+    // contract. (codex P2.)
+    final Object? parsed;
+    try {
+      parsed = jsonDecode(resp.body);
+    } catch (e) {
+      throw LogiAuthException(LogiAuthErrorCode.tokenExchangeFailed,
+          'Token response was not valid JSON', detail: '$e');
+    }
+    if (parsed is! Map<String, dynamic> || parsed['access_token'] is! String) {
+      throw LogiAuthException(LogiAuthErrorCode.tokenExchangeFailed,
+          'Token response was missing access_token');
+    }
+    return parsed;
   }
 
   /// Fetch JWKS (1h cache) and verify. On `unknown_kid` from a stale cache —
@@ -195,7 +209,15 @@ class LogiAuth {
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw LogiAuthException(LogiAuthErrorCode.jwksFetchFailed, 'JWKS fetch failed (HTTP ${resp.statusCode})');
     }
-    final jwks = Jwks.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+    // A malformed 2xx JWKS body (proxy error page, unexpected shape) must
+    // surface as jwksFetchFailed, not a raw parse/type error. (codex P2.)
+    final Jwks jwks;
+    try {
+      jwks = Jwks.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+    } catch (e) {
+      throw LogiAuthException(LogiAuthErrorCode.jwksFetchFailed,
+          'JWKS response was not valid JSON', detail: '$e');
+    }
     _jwksCache = jwks;
     _jwksFetchedAt = DateTime.now();
     return (jwks, false);
