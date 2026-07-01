@@ -112,6 +112,12 @@ VerifiedIdToken verifyIdToken(
     throw IdTokenVerificationException(IdTokenVerifyError.malformed);
   }
 
+  // Only RS256 is accepted — never verify a token whose header declares another
+  // (or no) algorithm, even if the RSA signature happens to match.
+  if (header['alg'] != 'RS256') {
+    throw IdTokenVerificationException(IdTokenVerifyError.badSignature);
+  }
+
   // kid → JWKS key.
   final kid = header['kid'];
   if (kid is! String || kid.isEmpty) {
@@ -142,6 +148,20 @@ VerifiedIdToken verifyIdToken(
 
   if (!_audienceMatches(payload['aud'], expected.clientId)) {
     throw IdTokenVerificationException(IdTokenVerifyError.audMismatch);
+  }
+
+  // OIDC §3.1.3.7 azp: with multiple audiences an azp MUST be present; whenever
+  // azp is present it MUST equal our client_id.
+  final aud = payload['aud'];
+  final azp = payload['azp'];
+  if (aud is List && aud.length > 1) {
+    if (azp != expected.clientId) {
+      throw IdTokenVerificationException(IdTokenVerifyError.audMismatch);
+    }
+  } else if (azp != null) {
+    if (azp != expected.clientId) {
+      throw IdTokenVerificationException(IdTokenVerifyError.audMismatch);
+    }
   }
 
   final exp = _numericClaim(payload['exp']);
