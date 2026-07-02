@@ -1,6 +1,6 @@
 name: logi_auth
 description: "Thin \"Sign in with logi\" connector for Flutter RP apps — OAuth 2.0 Authorization Code + PKCE with client-side id_token (RS256) verification."
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/dcode-co/logi-auth-flutter
 
 environment:
