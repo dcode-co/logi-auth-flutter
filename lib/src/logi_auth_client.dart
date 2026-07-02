@@ -101,7 +101,10 @@ class LogiAuth {
       throw LogiAuthException(LogiAuthErrorCode.missingIdToken,
           'Token response had no id_token — was `openid` in the scopes?');
     }
-    final verified = await _verifyWithRotationRetry(idToken, nonce);
+    // _exchange guarantees access_token is a String; pass it so the verifier
+    // rejects an at_hash mismatch (token substitution) before a session exists.
+    final accessToken = tokens['access_token'] as String;
+    final verified = await _verifyWithRotationRetry(idToken, nonce, accessToken);
 
     final email = verified.claims['email'];
     final expiresIn = tokens['expires_in'];
@@ -109,7 +112,7 @@ class LogiAuth {
       sub: verified.sub,
       email: email is String ? email : null,
       idToken: idToken,
-      accessToken: tokens['access_token'] as String,
+      accessToken: accessToken,
       refreshToken: tokens['refresh_token'] as String?,
       expiresAt: expiresIn is int ? DateTime.now().add(Duration(seconds: expiresIn)) : null,
       scope: tokens['scope'] as String?,
@@ -164,7 +167,8 @@ class LogiAuth {
   /// Fetch JWKS (1h cache) and verify. On `unknown_kid` from a stale cache —
   /// the IdP rotated signing keys within the TTL — bust the cache, refetch
   /// once, and re-verify so key rotation doesn't lock out every sign-in.
-  Future<VerifiedIdToken> _verifyWithRotationRetry(String idToken, String nonce) async {
+  Future<VerifiedIdToken> _verifyWithRotationRetry(
+      String idToken, String nonce, String accessToken) async {
     final expected = VerifyExpected(
       issuer: config.tokenIssuer,
       clientId: config.clientId,
@@ -172,12 +176,12 @@ class LogiAuth {
     );
     final (jwks, fromCache) = await _fetchJwks();
     try {
-      return verifyIdToken(idToken, jwks, expected);
+      return verifyIdToken(idToken, jwks, expected, accessToken: accessToken);
     } on IdTokenVerificationException catch (e) {
       if (e.error == IdTokenVerifyError.unknownKid && fromCache) {
         final (fresh, _) = await _fetchJwks(forceRefresh: true);
         try {
-          return verifyIdToken(idToken, fresh, expected);
+          return verifyIdToken(idToken, fresh, expected, accessToken: accessToken);
         } on IdTokenVerificationException catch (retry) {
           throw LogiAuthException(LogiAuthErrorCode.idTokenInvalid,
               'id_token verification failed', detail: retry.error.code);

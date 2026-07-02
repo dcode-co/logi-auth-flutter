@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:pointycastle/export.dart';
 
 // RS256 id_token 검증 — pointycastle(pure Dart) RSA primitive만 사용.
@@ -22,6 +23,7 @@ enum IdTokenVerifyError {
   audMismatch('aud_mismatch'),
   expired('expired'),
   nonceMismatch('nonce_mismatch'),
+  atHashMismatch('at_hash_mismatch'),
   missingClaim('missing_claim');
 
   const IdTokenVerifyError(this.code);
@@ -38,17 +40,33 @@ class IdTokenVerificationException implements Exception {
 
 /// A JSON Web Key (RSA).
 class Jwk {
-  Jwk({required this.kty, required this.n, required this.e, required this.kid});
+  Jwk({
+    required this.kty,
+    required this.n,
+    required this.e,
+    required this.kid,
+    this.alg,
+    this.use,
+  });
   factory Jwk.fromJson(Map<String, dynamic> j) => Jwk(
         kty: j['kty'] as String,
-        n: j['n'] as String,
-        e: j['e'] as String,
+        // Non-RSA keys (e.g. EC with crv/x/y) legitimately have no n/e — a JWKS
+        // may mix key types. Default to '' so parsing tolerates them; the
+        // kty/use/alg filter in verifyIdToken skips them before the RSA path.
+        n: j['n'] as String? ?? '',
+        e: j['e'] as String? ?? '',
         kid: j['kid'] as String,
+        // Optional per JWK spec — null means "unconstrained" and is tolerated
+        // by the RS256-signing-key filter below (parity with Node/Swift/Android).
+        alg: j['alg'] as String?,
+        use: j['use'] as String?,
       );
   final String kty;
   final String n;
   final String e;
   final String kid;
+  final String? alg;
+  final String? use;
 }
 
 /// A JWKS document.
@@ -87,15 +105,23 @@ class VerifiedIdToken {
 /// Verify a logi-issued id_token and return its verified subject. Throws
 /// [IdTokenVerificationException] on any failure — never returns an unverified
 /// subject. Claim order matches server + Web/iOS/Android:
-/// signature → iss → aud → exp → iat → nonce → sub.
+/// signature → iss → aud → exp → iat → nonce → sub → at_hash.
 ///
 /// [now] is Unix seconds; defaults to now. Injectable for deterministic tests.
+///
+/// [accessToken] is the token endpoint's `access_token` (present-only OIDC
+/// §3.1.3.6 at_hash binding). When the payload carries an `at_hash` **and** an
+/// [accessToken] is supplied, they must agree —
+/// `base64url_nopad(SHA256(access_token)[0..15])` — else
+/// [IdTokenVerifyError.atHashMismatch]. Omitting [accessToken] (or a token with
+/// no `at_hash`) skips the check, so existing callers stay backward-compatible.
 VerifiedIdToken verifyIdToken(
   String idToken,
   Jwks jwks,
   VerifyExpected expected, {
   int? now,
   int clockSkewSec = 60,
+  String? accessToken,
 }) {
   final nowSec = now ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
@@ -124,9 +150,18 @@ VerifiedIdToken verifyIdToken(
   if (kid is! String || kid.isEmpty) {
     throw IdTokenVerificationException(IdTokenVerifyError.missingKid);
   }
+  // Match on kid AND the RS256-signing-key gates (kty=="RSA", use in {null,sig},
+  // alg in {null,RS256}) — single cross-SDK contract shared with
+  // Node/Swift/Android/Web. If the IdP ever publishes EC (or encryption `use=enc`)
+  // keys alongside RSA, a non-signing key sharing a kid would otherwise be fed to
+  // the RSA verifier. Selecting the RSA signing key keeps RS256 logins working; a
+  // kid with no such match keeps the existing unknownKid contract.
   Jwk? jwk;
   for (final k in jwks.keys) {
-    if (k.kid == kid) {
+    if (k.kid == kid &&
+        k.kty == 'RSA' &&
+        (k.use == null || k.use == 'sig') &&
+        (k.alg == null || k.alg == 'RS256')) {
       jwk = k;
       break;
     }
@@ -185,10 +220,28 @@ VerifiedIdToken verifyIdToken(
     throw IdTokenVerificationException(IdTokenVerifyError.missingClaim);
   }
 
+  // at_hash (OIDC §3.1.3.6) — present-only. Verified last, after the token is
+  // otherwise trusted, so a mismatch is rejected before any session is built.
+  final atHash = payload['at_hash'];
+  if (atHash is String && accessToken != null) {
+    if (_atHash(accessToken) != atHash) {
+      throw IdTokenVerificationException(IdTokenVerifyError.atHashMismatch);
+    }
+  }
+
   return VerifiedIdToken(sub, payload);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/// OIDC §3.1.3.6 at_hash of an access_token: base64url (no padding) of the
+/// left-most 128 bits (16 bytes) of SHA-256(access_token UTF-8 bytes). Single
+/// contract shared byte-for-byte with the Web/iOS/Android/Node SDKs.
+String _atHash(String accessToken) {
+  final digest = crypto.sha256.convert(utf8.encode(accessToken)).bytes;
+  final half = Uint8List.fromList(digest.sublist(0, 16));
+  return base64Url.encode(half).replaceAll('=', '');
+}
 
 bool _verifyRs256(String signingInput, Uint8List signature, Jwk jwk) {
   final modulusBytes = _base64UrlDecode(jwk.n);

@@ -27,11 +27,14 @@ void main() {
     for (final c in cases) {
       final name = c['name'] as String;
       final token = c['token'] as String;
+      // Present-only at_hash binding: threaded into verifyIdToken when set
+      // (cases without it skip at_hash, staying backward compatible).
+      final accessToken = c['accessToken'] as String?;
       final expect_ = c['expect'] as Map<String, dynamic>;
       final wantValid = expect_['valid'] as bool;
 
       try {
-        final result = verifyIdToken(token, jwks, expected, now: now);
+        final result = verifyIdToken(token, jwks, expected, now: now, accessToken: accessToken);
         expect(wantValid, isTrue, reason: "case '$name' expected invalid but verified");
         final wantSub = expect_['sub'];
         if (wantSub is String) {
